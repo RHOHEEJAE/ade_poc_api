@@ -1,0 +1,31 @@
+[project]
+name = "ade-poc-api"
+version = "0.1.0"
+description = "ADE PoC 수집 API — SDK 요청을 받은 그대로 원시 DB(Postgres)에 넣는다"
+# 로컬 · CI 는 3.11, Vercel 은 3.12 를 쓴다
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "fastapi==0.115.6",
+  "psycopg[binary,pool]==3.2.10",
+  "loguru==0.7.3",
+]
+
+[dependency-groups]
+dev = [
+  "pytest==8.3.4",
+  "httpx==0.28.1",
+  "ruff==0.8.4",
+  "uvicorn[standard]==0.32.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# 패키지로 설치하지 않으므로 프로젝트 폴더를 import 경로에 넣는다
+pythonpath = ["."]
