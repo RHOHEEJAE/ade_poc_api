@@ -202,3 +202,11 @@ def test_diag_kind_longer_than_code_is_unparsable() -> None:
     store = FakeStore()
     _client(store).post("/diag", json={"kind": "x" * 21, "lib_version": "2.82.1"})
     assert store.diag[0].kind == "unparsable"
+
+
+def test_docs_show_one_path_per_route_but_both_are_served() -> None:
+    c = _client(FakeStore())
+    paths = set(c.get("/openapi.json").json()["paths"])
+    assert paths == {"/track/", "/engage/", "/groups/", "/diag/", "/livez", "/readyz"}
+    assert c.post("/track", content=BODY).status_code == 200
+    assert c.post("/diag", json={"kind": "storage_blocked"}).status_code == 200

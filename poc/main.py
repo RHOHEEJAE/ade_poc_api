@@ -36,6 +36,23 @@ from poc.web import (
 )
 
 COLLECT_ROUTES = ("track", "engage", "groups")
+
+# 문서(/docs)에 보이는 경로 설명. 슬래시 있는 쪽 한 줄만 문서에 싣는다
+ROUTE_SUMMARY = {
+    "track": "track: 행동 이벤트 받기",
+    "engage": "engage: 사용자 프로필 갱신 받기",
+    "groups": "groups: 그룹 프로필 갱신 받기",
+    "diag": "diag: SDK 오류 신호 받기",
+}
+_PROFILE_ONLY = (
+    "요청 원본만 collection_request_history 에 넣는다. 프로필 갱신이라 이벤트로 풀지 않는다."
+)
+ROUTE_DESCRIPTION = {
+    "track": "요청 원본을 collection_request_history 에, 풀어 낸 이벤트를 event_history 에 넣는다.",
+    "engage": _PROFILE_ONLY,
+    "groups": _PROFILE_ONLY,
+    "diag": "kind · lib_version · application_id 만 diagnosis_history 에 넣는다.",
+}
 # 벤더가 부를 수 있지만 쓰지 않는 기능. 404 를 받으면 SDK 가 그 기능을 건너뛴다
 STUB_ROUTES = ("settings", "record", "flags")
 
@@ -137,11 +154,25 @@ def create_app(settings: Settings, store: PgStore | None) -> FastAPI:
     async def preflight(request: Request) -> Response:
         return Response(status_code=204, headers=preflight_headers(request, settings.origins))
 
-    for route in COLLECT_ROUTES:
-        # 끝 슬래시가 있든 없든 받는다. 하나만 받으면 307 로 돌려보내는데, 따라가지 않는 SDK 가 있다
+    def register(route: str, handler: Callable[[Request], Awaitable[Response]]) -> None:
+        """수집 경로 하나를 POST · OPTIONS 로 등록한다.
+
+        끝 슬래시가 있든 없든 받는다. 하나만 받으면 FastAPI 가 307 로 돌려보내는데, 따라가지 않는
+        SDK 가 있고 비콘 전송은 아예 따라가지 못한다. 문서에는 SDK 가 쓰는 슬래시 쪽만 싣는다.
+        """
         for path in (f"/{route}", f"/{route}/"):
-            app.add_api_route(path, make_collect(route), methods=["POST"])
+            app.add_api_route(
+                path,
+                handler,
+                methods=["POST"],
+                include_in_schema=path.endswith("/"),
+                summary=ROUTE_SUMMARY[route],
+                description=ROUTE_DESCRIPTION[route],
+            )
             app.add_api_route(path, preflight, methods=["OPTIONS"], include_in_schema=False)
+
+    for route in COLLECT_ROUTES:
+        register(route, make_collect(route))
 
     async def diag(request: Request) -> Response:
         headers = cors_headers(request, settings.origins)
@@ -165,9 +196,7 @@ def create_app(settings: Settings, store: PgStore | None) -> FastAPI:
             return _error(503, "temporarily unavailable", headers)
         return _ok(request, headers)
 
-    for path in ("/diag", "/diag/"):
-        app.add_api_route(path, diag, methods=["POST"])
-        app.add_api_route(path, preflight, methods=["OPTIONS"], include_in_schema=False)
+    register("diag", diag)
 
     async def stub() -> Response:
         return Response(status_code=404)
@@ -176,12 +205,12 @@ def create_app(settings: Settings, store: PgStore | None) -> FastAPI:
         for path in (f"/{name}", f"/{name}/"):
             app.add_api_route(path, stub, methods=["GET", "POST"], include_in_schema=False)
 
-    @app.get("/livez")
+    @app.get("/livez", summary="livez: 프로세스 확인")
     async def livez() -> dict[str, str]:
         """프로세스가 응답하는지. DB 는 보지 않는다."""
         return {"status": "ok"}
 
-    @app.get("/readyz")
+    @app.get("/readyz", summary="readyz: 원시 DB · 테이블 확인")
     async def readyz() -> Response:
         """원시 DB 에 닿는지. 쓰지는 않는다."""
         if store is None:
