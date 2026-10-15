@@ -11,7 +11,8 @@
 #   503  우리 쪽 실패다. SDK 가 다시 보낸다
 # 그 밖의 4xx 를 주면 SDK 가 배치를 지워 영구 손실이 된다.
 #
-# PoC 범위: 요청 원본(ade_raw)을 남기고, /track 본문을 이벤트 단위로 풀어 원시(ade_event)에 넣는다.
+# PoC 범위: 요청 원본(collection_request_history)을 남기고, /track 본문을 이벤트 단위로 풀어
+# 원시 이벤트(event_history)에 넣는다.
 # 원시에는 어휘로 찾은 service_id 를 채운다. 토큰 확인 · 중복 제거 · 속도 제한은 하지 않는다.
 import json
 from collections.abc import Awaitable, Callable
@@ -39,6 +40,7 @@ COLLECT_ROUTES = ("track", "engage", "groups")
 STUB_ROUTES = ("settings", "record", "flags")
 
 DIAG_UNPARSABLE = "unparsable"
+DIAG_KIND_SIZE = 20
 
 # 저장 실패로 보고 503 을 낼 예외
 STORE_ERRORS = (psycopg.Error, RuntimeError, OSError)
@@ -60,7 +62,8 @@ def _explode(
 ) -> tuple[list[EventRow], str | None]:
     """본문을 원시 이벤트 행으로 푼다. `/track` 만 푼다.
 
-    `/engage` · `/groups` 는 이벤트가 아니라 프로필 갱신이라 원본(ade_raw)에만 남긴다.
+    `/engage` · `/groups` 는 이벤트가 아니라 프로필 갱신이라
+    원본(collection_request_history)에만 남긴다.
     풀지 못해도 예외를 던지지 않는다 — 사유를 돌려주고 원본은 그대로 저장한다.
     """
     if route != "track":
@@ -79,12 +82,15 @@ def _pick_diag(body: bytes | None) -> tuple[str, str | None, str | None]:
         data = json.loads(body.decode("utf-8", errors="replace"))
     except (ValueError, RecursionError):
         return DIAG_UNPARSABLE, None, None
-    if not isinstance(data, dict) or not isinstance(data.get("kind"), str):
+    kind = data.get("kind") if isinstance(data, dict) else None
+    # 종류 칸은 코드(varchar(20))다. 그보다 긴 값은 SDK 가 정한 종류가 아니므로
+    # 읽을 수 없는 것으로 본다
+    if not isinstance(kind, str) or len(kind) > DIAG_KIND_SIZE:
         return DIAG_UNPARSABLE, None, None
     lib = data.get("lib_version")
     app_id = data.get("application_id")
     return (
-        data["kind"],
+        kind,
         lib if isinstance(lib, str) else None,
         app_id if isinstance(app_id, str) else None,
     )
@@ -122,7 +128,7 @@ def create_app(settings: Settings, store: PgStore | None) -> FastAPI:
                 # 200 전에 저장을 끝낸다. 서버리스는 응답 뒤 작업이 끝까지 돈다는 보장이 없다
                 await run_in_threadpool(store.store_raw, row, events, events_error)
             except STORE_ERRORS as e:
-                logger.error("ade_raw 적재 실패: {}", type(e).__name__)
+                logger.error("collection_request_history 적재 실패: {}", type(e).__name__)
                 return _error(503, "temporarily unavailable", headers)
             return _ok(request, headers)
 
@@ -155,7 +161,7 @@ def create_app(settings: Settings, store: PgStore | None) -> FastAPI:
         try:
             await run_in_threadpool(store.store_diag, row)
         except STORE_ERRORS as e:
-            logger.error("ade_diag 적재 실패: {}", type(e).__name__)
+            logger.error("diagnosis_history 적재 실패: {}", type(e).__name__)
             return _error(503, "temporarily unavailable", headers)
         return _ok(request, headers)
 

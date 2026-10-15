@@ -16,7 +16,7 @@ ROLE_TO_SERVICE: dict[str, str] = {
     "product": "store",
 }
 
-# 이 표를 옮겨 온 codegen 커밋. ade_event 에는 남기지 않고, 표를 고칠 때 함께 고친다
+# 이 표를 옮겨 온 codegen 커밋. event_history 에는 남기지 않고, 표를 고칠 때 함께 고친다
 VOCAB_SOURCE = "codegen@6c5815b"
 
 

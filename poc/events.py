@@ -2,7 +2,7 @@
 # Team    : 데이터 엔지니어링팀
 # Author  : 노희재
 # Created : 2026-10-14
-# Desc    : 풀어 낸 이벤트를 ade_event 행으로 바꾼다. 자주 찾는 값만 칸으로 꺼내고 원형은 둔다
+# Desc    : 풀어 낸 이벤트를 event_history 행으로 바꾼다. 자주 찾는 값만 칸으로 꺼내고 원형은 둔다
 # ================================================================
 #
 # 값을 고치지 않는다. 칸으로 꺼내는 값은 원형(payload)에도 그대로 남는다.
@@ -24,7 +24,7 @@ _MS_THRESHOLD = 1e11
 
 @dataclass(frozen=True)
 class EventRow:
-    """`ade_event` 한 행. 배치 안의 이벤트 하나."""
+    """`event_history` 한 행. 배치 안의 이벤트 하나."""
 
     event_index: int
     event: str | None
@@ -96,8 +96,9 @@ def to_event_row(index: int, item: Any) -> EventRow:
 def to_event_rows(items: list[Any]) -> tuple[list[EventRow], str | None]:
     """배치 전체를 행으로. 하나라도 원형을 쓸 수 없으면 전부 넣지 않는다.
 
-    일부만 넣으면 그 요청에서 어떤 이벤트가 빠졌는지 원시만 보고는 알 수 없다. 원본(ade_raw)에는
-    요청이 그대로 남으므로, 실패 사유만 남기고 다시 풀 수 있게 둔다.
+    일부만 넣으면 그 요청에서 어떤 이벤트가 빠졌는지 원시만 보고는 알 수 없다.
+    원본(collection_request_history)에는 요청이 그대로 남으므로, 실패 사유만 남기고 다시 풀 수
+    있게 둔다.
 
     Returns:
         (행 목록, 실패 사유). 성공하면 사유는 None.

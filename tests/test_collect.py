@@ -196,3 +196,9 @@ def test_engage_is_not_exploded() -> None:
     store = FakeStore()
     _client(store).post("/engage", content=b"data=%5B%7B%22%24set%22%3A%7B%7D%7D%5D")
     assert len(store.raw) == 1 and store.events == [] and store.errors == [None]
+
+
+def test_diag_kind_longer_than_code_is_unparsable() -> None:
+    store = FakeStore()
+    _client(store).post("/diag", json={"kind": "x" * 21, "lib_version": "2.82.1"})
+    assert store.diag[0].kind == "unparsable"
