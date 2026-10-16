@@ -16,6 +16,7 @@
 # 원시에는 어휘로 찾은 service_id 를 채운다. 토큰 확인 · 중복 제거 · 속도 제한은 하지 않는다.
 import json
 from collections.abc import Awaitable, Callable
+from inspect import cleandoc
 
 import psycopg
 from fastapi import FastAPI, Request, Response
@@ -37,21 +38,53 @@ from poc.web import (
 
 COLLECT_ROUTES = ("track", "engage", "groups")
 
-# 문서(/docs)에 보이는 경로 설명. 슬래시 있는 쪽 한 줄만 문서에 싣는다
+# 문서(/docs)에 보이는 경로 설명. 슬래시 있는 쪽 한 줄만 문서에 싣는다.
+# 지금 SDK 기준으로 실제로 오는지도 적는다. 받는 자리가 있다고 쓰이는 경로로 오해하지 않게 한다
 ROUTE_SUMMARY = {
     "track": "track: 행동 이벤트 받기",
-    "engage": "engage: 사용자 프로필 갱신 받기",
-    "groups": "groups: 그룹 프로필 갱신 받기",
+    "engage": "engage: 사용자 프로필 갱신 받기 (그룹 함수를 부를 때만)",
+    "groups": "groups: 그룹 프로필 갱신 받기 (지금 SDK 는 보내지 않음)",
     "diag": "diag: SDK 오류 신호 받기",
 }
-_PROFILE_ONLY = (
-    "요청 원본만 collection_request_history 에 넣는다. 프로필 갱신이라 이벤트로 풀지 않는다."
-)
 ROUTE_DESCRIPTION = {
-    "track": "요청 원본을 collection_request_history 에, 풀어 낸 이벤트를 event_history 에 넣는다.",
-    "engage": _PROFILE_ONLY,
-    "groups": _PROFILE_ONLY,
-    "diag": "kind · lib_version · application_id 만 diagnosis_history 에 넣는다.",
+    "track": cleandoc(
+        """
+        사용자 행동 이벤트(클릭 · 노출 · 페이지뷰 · 업무 결과)를 받는다.
+
+        - 요청 원본 1행을 `collection_request_history` 에 넣는다.
+        - 본문을 이벤트 단위로 풀어 `event_history` 에 N행 넣는다.
+        - 요청 하나에 이벤트가 여러 건 묶여 온다.
+        """
+    ),
+    "engage": cleandoc(
+        """
+        사용자 한 명의 프로필 속성을 바꾸라는 명령(`$set` · `$union` · `$remove` 등)을 받는다.
+        이벤트가 아니다.
+
+        - **지금 SDK 에서는 `adesdk.set_group` · `add_group` · `remove_group` 을 부를 때만 온다.**
+          사용자를 그룹(회사 · 팀 등)에 소속시키면서 사용자 프로필에 그 값을 적는 요청이다.
+        - 그 밖의 프로필 기능(`people.*`)은 SDK 에서 막았다. PoC 화면은 그룹 함수를 부르지 않는다.
+        - 요청 원본만 `collection_request_history` 에 넣는다. 이벤트로 풀지 않는다.
+        """
+    ),
+    "groups": cleandoc(
+        """
+        그룹(회사 · 팀 등) 하나의 프로필 속성을 바꾸라는 명령을 받는다. 이벤트가 아니다.
+
+        - **지금 SDK 는 이 경로로 보내지 않는다.** 보내는 기능(`get_group`)을 SDK 에서 막았다.
+        - Mixpanel 경로와 맞춰 받는 자리만 둔다. 지우면 나중에 그룹 기능을 켰을 때 404 가 나고
+          SDK 가 그 배치를 버린다.
+        - 요청이 오면 원본만 `collection_request_history` 에 넣는다.
+        """
+    ),
+    "diag": cleandoc(
+        """
+        SDK 자체 오류 신호(전송 실패 · 저장소 차단 · 내부 예외)를 받는다. 이벤트와 섞지 않는다.
+
+        - `kind` · `lib_version` · `application_id` 세 값만 `diagnosis_history` 에 넣는다.
+        - 읽을 수 없는 본문은 `unparsable` 로 넣고 200 을 준다.
+        """
+    ),
 }
 # 벤더가 부를 수 있지만 쓰지 않는 기능. 404 를 받으면 SDK 가 그 기능을 건너뛴다
 STUB_ROUTES = ("settings", "record", "flags")
@@ -205,12 +238,20 @@ def create_app(settings: Settings, store: PgStore | None) -> FastAPI:
         for path in (f"/{name}", f"/{name}/"):
             app.add_api_route(path, stub, methods=["GET", "POST"], include_in_schema=False)
 
-    @app.get("/livez", summary="livez: 프로세스 확인")
+    @app.get(
+        "/livez",
+        summary="livez: 프로세스 확인",
+        description="서버가 떠 있는지만 본다. DB 는 보지 않는다.",
+    )
     async def livez() -> dict[str, str]:
         """프로세스가 응답하는지. DB 는 보지 않는다."""
         return {"status": "ok"}
 
-    @app.get("/readyz", summary="readyz: 원시 DB · 테이블 확인")
+    @app.get(
+        "/readyz",
+        summary="readyz: 원시 DB · 테이블 확인",
+        description="원시 DB 에 접속되고 테이블 셋에 닿는지 본다. 아니면 503.",
+    )
     async def readyz() -> Response:
         """원시 DB 에 닿는지. 쓰지는 않는다."""
         if store is None:
